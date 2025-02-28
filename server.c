@@ -98,7 +98,7 @@ void send_response(int server_socket, struct sockaddr_in *client_addr, socklen_t
     if (sendto(server_socket, response_packet, response_size, 0, (struct sockaddr *)client_addr, client_addr_len) < 0) {
         perror("Send response failed");
     }
-    printf("Response sent for Subscriber No: %llu\n", request_packet->subscriber_no);
+    printf("Above Response sent to client for Subscriber No: %llu\n", request_packet->subscriber_no);
 }
 
 
