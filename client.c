@@ -11,21 +11,40 @@
 #define TECHNOLOGY 0x04 // 4G
 #define MAX_RETRIES 3
 #define TIMEOUT 3 
-
+#define MAX_PACKET_SIZE sizeof(AccessGrantedResponsePacket)
 
 // send access request
-void send_access_request(int sockfd, struct sockaddr_in *server_addr, unsigned long long subscriber_no) {
+ssize_t send_access_request(int client_socket, struct sockaddr_in *server_addr, socklen_t server_addr_len, unsigned long long subscriber_no, unsigned char *response_buffer) {
     AccessRequestPacket request_packet;
     create_access_request_packet(&request_packet, CLIENT_ID, TECHNOLOGY, subscriber_no);
 
-    ssize_t sent = sendto(sockfd, &request_packet, sizeof(request_packet), 0, 
-                               (struct sockaddr *) server_addr, sizeof(*server_addr));
-    if (sent < 0){
-        perror("Send Failed");
-        exit(EXIT_FAILURE);
+    int retries = 0;
+    struct timeval timeout = {TIMEOUT, 0};
+    setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    while (retries < MAX_RETRIES) {
+        // Send access request
+        if (sendto(client_socket, &request_packet, sizeof(request_packet), 0, (struct sockaddr *)server_addr, server_addr_len) < 0) {
+            perror("Send failed");
+            return -1;
+        }
+        printf("Access request sent (Attempt %d) for Subscriber No: %llu\n", retries + 1, subscriber_no);
+
+        // Try to receive response
+        ssize_t received = recvfrom(client_socket, response_buffer, MAX_PACKET_SIZE, 0, NULL, NULL);
+        
+        if (received > 0) {
+            printf("Response received for Subscriber No: %llu\n", subscriber_no);
+            return received;  // Return the received response size
+        }
+        printf("No response received. Retrying...\n");
+        retries++;
     }
-    printf("Access request sent for Subscriber No: %llu\n", subscriber_no);
+
+    printf("Max retries reached. No response from server.\n");
+    return -1;
 }
+
 
 // handle the response from the server
 void handle_server_response(unsigned char *buffer, unsigned long long subscriber_no) {
@@ -71,21 +90,17 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Send an access request to server
-    send_access_request(client_socket, &server_addr, subscriber_no);
+    // Buffer to store response
+    unsigned char buffer[MAX_PACKET_SIZE];
 
-    // Wait for response (blocking call)
-    unsigned char buffer[sizeof(AccessGrantedResponsePacket)];
-    ssize_t received = recvfrom(client_socket, buffer, sizeof(buffer), 0, NULL, NULL);
-    if (received < 0){
-        perror("Receive failed");
-        exit(EXIT_FAILURE);
+    // Send access request and receive response in the same function
+    ssize_t received = send_access_request(client_socket, &server_addr, server_addr_len, subscriber_no, buffer);
+    if (received > 0) {
+        handle_server_response(buffer, subscriber_no);
+        printf("Received response of size: %zd\n", received);
+    } else {
+        printf("No valid response received.\n");
     }
-
-    // Handle the response from the server
-    handle_server_response(buffer, subscriber_no);
-    printf("Received response of size: %zd\n", received);
-
 
     // Close the socket
     close(client_socket);

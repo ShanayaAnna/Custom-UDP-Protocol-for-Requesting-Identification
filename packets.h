@@ -22,7 +22,7 @@ typedef struct {
     unsigned int acc_per;        // 0xFFF8 (Access Permission)
     unsigned char segment_no;    // Segment Number (1 byte)
     unsigned char length;        // Max 0xFF (Length)
-    unsigned char technology;    // Technology (02, 03, 04, 05)
+    unsigned char technology;    // (02, 03, 04, 05)
     unsigned long long subscriber_no; // Source Subscriber No (Max 0xFFFFFFFFFF)
     unsigned int end_id;         // 0xFFFF (End of Packet ID)
 } AccessRequestPacket;

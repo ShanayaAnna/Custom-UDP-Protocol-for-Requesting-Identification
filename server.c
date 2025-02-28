@@ -48,23 +48,34 @@ SubscriberRecord *find_subscriber(unsigned long long subscriber_no, unsigned cha
 
 // send the appropriate response to the client
 void send_response(int server_socket, struct sockaddr_in *client_addr, socklen_t client_addr_len, AccessRequestPacket *request_packet, SubscriberRecord *record) {
+    void *response_packet = NULL;
+    size_t response_size = 0;
+
     if (!record) {
-        // Subscriber does not exist
         NotExistResponsePacket response;
         create_not_exist_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
+        response_packet = &response;
+        response_size = sizeof(response);
     } else if (record->paid == 0) {
-        // Subscriber has not paid
         NotPaidResponsePacket response;
         create_not_paid_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
+        response_packet = &response;
+        response_size = sizeof(response);
     } else {
-        // Subscriber permitted to access
         AccessGrantedResponsePacket response;
         create_access_granted_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
+        response_packet = &response;
+        response_size = sizeof(response);
     }
+
+    // Send response once
+    if (sendto(server_socket, response_packet, response_size, 0, (struct sockaddr *)client_addr, client_addr_len) < 0) {
+        perror("Send response failed");
+        return;
+    }
+    printf("Response sent for Subscriber No: %llu\n", request_packet->subscriber_no);
 }
+
 
 int main() {
     int server_socket;
@@ -113,8 +124,8 @@ int main() {
         SubscriberRecord *record = find_subscriber(request_packet.subscriber_no, request_packet.technology);
         
         // Send response to client
-        send_response(server_socket, &client_addr, client_addr_len, &request_packet, record);
         printf("Received request from Subscriber No: %llu\n", request_packet.subscriber_no);
+        send_response(server_socket, &client_addr, client_addr_len, &request_packet, record);
 
     }
 
