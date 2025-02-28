@@ -37,41 +37,66 @@ int load_database() {
 }
 
 // find a subscriber in the database
-SubscriberRecord *find_subscriber(unsigned long long subscriber_no, unsigned char technology) {
+typedef enum {
+    NOT_FOUND,
+    TECHNOLOGY_MISMATCH,
+    FOUND
+} SubscriberStatus;
+
+SubscriberStatus find_subscriber(unsigned long long subscriber_no, unsigned char technology, SubscriberRecord **record) {
+    SubscriberRecord *matched_record = NULL;
     for (int i = 0; i < MAX_RECORDS; i++) {
-        if (db[i].subscriber_no == subscriber_no && db[i].technology == technology) {
-            return &db[i];
+        if (db[i].subscriber_no == subscriber_no) {
+            matched_record = &db[i]; // Found subscriber, check technology
+            if (db[i].technology == technology) {
+                *record = &db[i];
+                return FOUND;  // Found subscriber with matching technology
+            }
         }
     }
-    return NULL;
+    *record = matched_record;
+    return (matched_record) ? TECHNOLOGY_MISMATCH : NOT_FOUND;  // Differentiate cases
 }
 
+
 // send the appropriate response to the client
-void send_response(int server_socket, struct sockaddr_in *client_addr, socklen_t client_addr_len, AccessRequestPacket *request_packet, SubscriberRecord *record) {
+void send_response(int server_socket, struct sockaddr_in *client_addr, socklen_t client_addr_len, 
+                   AccessRequestPacket *request_packet, SubscriberStatus status, SubscriberRecord *record) {
     void *response_packet = NULL;
     size_t response_size = 0;
 
-    if (!record) {
+    if (status == NOT_FOUND) {
         NotExistResponsePacket response;
         create_not_exist_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
         response_packet = &response;
         response_size = sizeof(response);
-    } else if (record->paid == 0) {
+        printf("Subscriber No: %llu does not exist in the database.\n", request_packet->subscriber_no);
+    } 
+    else if (status == TECHNOLOGY_MISMATCH) {
+        NotExistResponsePacket response;
+        create_not_exist_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
+        response_packet = &response;
+        response_size = sizeof(response);
+        printf("Subscriber No: %llu exists but with different technology.\n", request_packet->subscriber_no);
+    } 
+    else if (record->paid == 0) {
         NotPaidResponsePacket response;
         create_not_paid_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
         response_packet = &response;
         response_size = sizeof(response);
-    } else {
+        printf("Subscriber No: %llu has not paid.\n", request_packet->subscriber_no);
+    } 
+    else {
         AccessGrantedResponsePacket response;
         create_access_granted_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
         response_packet = &response;
         response_size = sizeof(response);
+        printf("Access granted to Subscriber No: %llu.\n", request_packet->subscriber_no);
     }
 
-    // Send response once
+    // Send response to client
     if (sendto(server_socket, response_packet, response_size, 0, (struct sockaddr *)client_addr, client_addr_len) < 0) {
         perror("Send response failed");
-        return;
     }
     printf("Response sent for Subscriber No: %llu\n", request_packet->subscriber_no);
 }
@@ -119,14 +144,13 @@ int main() {
             perror("Receive failed");
             continue;
         }
-
-        // Find subscriber in the database
-        SubscriberRecord *record = find_subscriber(request_packet.subscriber_no, request_packet.technology);
-        
-        // Send response to client
+    
+        SubscriberRecord *record = NULL;
+        SubscriberStatus status = find_subscriber(request_packet.subscriber_no, request_packet.technology, &record);
+    
         printf("Received request from Subscriber No: %llu\n", request_packet.subscriber_no);
-        send_response(server_socket, &client_addr, client_addr_len, &request_packet, record);
-
+        
+        send_response(server_socket, &client_addr, client_addr_len, &request_packet, status, record);
     }
 
     close(server_socket);
