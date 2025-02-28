@@ -9,20 +9,21 @@
 #define SERVER_IP "127.0.0.1"
 #define CLIENT_ID 1
 #define TECHNOLOGY 0x04 // 4G
+#define MAX_RETRIES 3
+#define TIMEOUT 3 
 
-void handle_error(const char *msg) {
-    perror(msg);
-    exit(1);
-}
 
 // send access request
 void send_access_request(int sockfd, struct sockaddr_in *server_addr, unsigned long long subscriber_no) {
     AccessRequestPacket request_packet;
     create_access_request_packet(&request_packet, CLIENT_ID, TECHNOLOGY, subscriber_no);
 
-    ssize_t sent_size = sendto(sockfd, &request_packet, sizeof(request_packet), 0, 
+    ssize_t sent = sendto(sockfd, &request_packet, sizeof(request_packet), 0, 
                                (struct sockaddr *) server_addr, sizeof(*server_addr));
-    if (sent_size < 0) handle_error("Send failed");
+    if (sent < 0){
+        perror("Send Failed");
+        exit(EXIT_FAILURE);
+    }
     printf("Access request sent for Subscriber No: %llu\n", subscriber_no);
 }
 
@@ -49,34 +50,44 @@ void handle_server_response(unsigned char *buffer, unsigned long long subscriber
 }
 
 int main() {
-    int sockfd;
+    int client_socket;
     struct sockaddr_in server_addr;
+    socklen_t server_addr_len = sizeof(server_addr);
     unsigned long long subscriber_no = 4086808821;
 
     // Create UDP socket
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) handle_error("Socket creation failed");
+    client_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (client_socket < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
 
     // Set up server address
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
     if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
-        handle_error("Invalid server address");
+        perror("Invalid server address");
+        exit(EXIT_FAILURE);
     }
 
     // Send an access request to server
-    send_access_request(sockfd, &server_addr, subscriber_no);
+    send_access_request(client_socket, &server_addr, subscriber_no);
 
     // Wait for response (blocking call)
     unsigned char buffer[sizeof(AccessGrantedResponsePacket)];
-    ssize_t received_size = recvfrom(sockfd, buffer, sizeof(buffer), 0, NULL, NULL);
-    if (received_size < 0) handle_error("Receive failed");
+    ssize_t received = recvfrom(client_socket, buffer, sizeof(buffer), 0, NULL, NULL);
+    if (received < 0){
+        perror("Receive failed");
+        exit(EXIT_FAILURE);
+    }
 
     // Handle the response from the server
     handle_server_response(buffer, subscriber_no);
+    printf("Received response of size: %zd\n", received);
+
 
     // Close the socket
-    close(sockfd);
+    close(client_socket);
     return 0;
 }

@@ -16,11 +16,6 @@ typedef struct {
 } SubscriberRecord;
 SubscriberRecord db[MAX_RECORDS];
 
-void handle_error(const char *msg) {
-    perror(msg);
-    exit(1);
-}
-
 // load the database
 int load_database() {
     FILE *file = fopen(DATABASE_FILE, "r");
@@ -52,32 +47,32 @@ SubscriberRecord *find_subscriber(unsigned long long subscriber_no, unsigned cha
 }
 
 // send the appropriate response to the client
-void send_response(int sockfd, struct sockaddr_in *client_addr, socklen_t addr_len, AccessRequestPacket *request_packet, SubscriberRecord *record) {
+void send_response(int server_socket, struct sockaddr_in *client_addr, socklen_t client_addr_len, AccessRequestPacket *request_packet, SubscriberRecord *record) {
     if (!record) {
         // Subscriber does not exist
         NotExistResponsePacket response;
         create_not_exist_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(sockfd, &response, sizeof(response), 0, (struct sockaddr *)client_addr, addr_len);
+        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
     } else if (record->paid == 0) {
         // Subscriber has not paid
         NotPaidResponsePacket response;
         create_not_paid_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(sockfd, &response, sizeof(response), 0, (struct sockaddr *)client_addr, addr_len);
+        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
     } else {
         // Subscriber permitted to access
         AccessGrantedResponsePacket response;
         create_access_granted_response_packet(&response, request_packet->client_id, request_packet->technology, request_packet->subscriber_no);
-        sendto(sockfd, &response, sizeof(response), 0, (struct sockaddr *)client_addr, addr_len);
+        sendto(server_socket, &response, sizeof(response), 0, (struct sockaddr *)client_addr, client_addr_len);
     }
 }
 
 int main() {
-    int sockfd;
+    int server_socket;
     struct sockaddr_in server_addr, client_addr;
-    socklen_t addr_len = sizeof(client_addr);
+    socklen_t client_addr_len = sizeof(client_addr);
 
     // Create UDP socket
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((server_socket = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("Socket creation failed");
         exit(1);
     }
@@ -89,24 +84,27 @@ int main() {
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
     // Bind the socket to the server address
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Bind failed");
-        exit(1);
+        close(server_socket);
+        exit(EXIT_FAILURE);
     }
+    printf("Server listening on port %d...\n", SERVER_PORT);
 
     // Load the database
     int db_size = load_database();
     if (db_size < 0) {
-        close(sockfd);
+        close(server_socket);
         exit(1);
     }
+    printf("Loading Verification_Database...\n");
 
     // Server loop to receive requests
     while (1) {
         AccessRequestPacket request_packet;
-        ssize_t received_size = recvfrom(sockfd, &request_packet, sizeof(request_packet), 0, 
-                                          (struct sockaddr *)&client_addr, &addr_len);
-        if (received_size < 0) {
+        ssize_t received = recvfrom(server_socket, &request_packet, sizeof(request_packet), 0, 
+                                          (struct sockaddr *)&client_addr, &client_addr_len);
+        if (received < 0) {
             perror("Receive failed");
             continue;
         }
@@ -115,9 +113,11 @@ int main() {
         SubscriberRecord *record = find_subscriber(request_packet.subscriber_no, request_packet.technology);
         
         // Send response to client
-        send_response(sockfd, &client_addr, addr_len, &request_packet, record);
+        send_response(server_socket, &client_addr, client_addr_len, &request_packet, record);
+        printf("Received request from Subscriber No: %llu\n", request_packet.subscriber_no);
+
     }
 
-    close(sockfd);
+    close(server_socket);
     return 0;
 }
