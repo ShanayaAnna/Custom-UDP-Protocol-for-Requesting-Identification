@@ -7,13 +7,14 @@
 
 #define SERVER_PORT 12345
 #define DATABASE_FILE "Verification_Database.txt"
+#define MAX_RECORDS 10  // Fixed size for the database
 
-// Database structure
 typedef struct {
     unsigned long long subscriber_no;
     unsigned char technology;
     int paid;
 } SubscriberRecord;
+SubscriberRecord db[MAX_RECORDS];
 
 void handle_error(const char *msg) {
     perror(msg);
@@ -21,15 +22,19 @@ void handle_error(const char *msg) {
 }
 
 // load the database
-int load_database(SubscriberRecord *db[]) {
+int load_database() {
     FILE *file = fopen(DATABASE_FILE, "r");
     if (!file) {
-        handle_error("Failed to open database");
+        perror("Failed to open database");
+        return -1;
     }
 
     size_t size = 0;
-    while (fscanf(file, "%llu %hhu %d", &db[size]->subscriber_no, &db[size]->technology, &db[size]->paid) != EOF) {
-        db[size] = malloc(sizeof(SubscriberRecord));  // Allocate memory for each record
+    while (size < MAX_RECORDS && !feof(file)) {
+        SubscriberRecord record;
+        fscanf(file, "%llu %hhu %d", &record.subscriber_no, &record.technology, &record.paid);
+
+        db[size] = record;
         size++;
     }
     fclose(file);
@@ -37,10 +42,10 @@ int load_database(SubscriberRecord *db[]) {
 }
 
 // find a subscriber in the database
-SubscriberRecord *find_subscriber(SubscriberRecord *db[], int db_size, unsigned long long subscriber_no, unsigned char technology) {
-    for (int i = 0; i < db_size; i++) {
-        if (db[i]->subscriber_no == subscriber_no && db[i]->technology == technology) {
-            return db[i];
+SubscriberRecord *find_subscriber(unsigned long long subscriber_no, unsigned char technology) {
+    for (int i = 0; i < MAX_RECORDS; i++) {
+        if (db[i].subscriber_no == subscriber_no && db[i].technology == technology) {
+            return &db[i];
         }
     }
     return NULL;
@@ -72,8 +77,10 @@ int main() {
     socklen_t addr_len = sizeof(client_addr);
 
     // Create UDP socket
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) handle_error("Socket creation failed");
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        perror("Socket creation failed");
+        exit(1);
+    }
 
     // Set up server address
     memset(&server_addr, 0, sizeof(server_addr));
@@ -83,13 +90,17 @@ int main() {
 
     // Bind the socket to the server address
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        handle_error("Bind failed");
+        perror("Bind failed");
+        exit(1);
     }
 
     // Load the database
-    SubscriberRecord *db[10];
-    int db_size = load_database(db);
-    
+    int db_size = load_database();
+    if (db_size < 0) {
+        close(sockfd);
+        exit(1);
+    }
+
     // Server loop to receive requests
     while (1) {
         AccessRequestPacket request_packet;
@@ -101,7 +112,7 @@ int main() {
         }
 
         // Find subscriber in the database
-        SubscriberRecord *record = find_subscriber(db, db_size, request_packet.subscriber_no, request_packet.technology);
+        SubscriberRecord *record = find_subscriber(request_packet.subscriber_no, request_packet.technology);
         
         // Send response to client
         send_response(sockfd, &client_addr, addr_len, &request_packet, record);
